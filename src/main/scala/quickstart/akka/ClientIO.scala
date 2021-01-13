@@ -1,108 +1,80 @@
 package quickstart.akka
 
 import akka.actor.typed.Behavior
-import akka.actor.typed.scaladsl.{ActorContext, Behaviors}
-import akka.actor.{Actor, ActorRef, ActorSystem, Props}
+import akka.actor.typed.scaladsl.Behaviors
+import quickstart.messages._
+import akka.actor.{Actor, ActorRef, ActorSystem, Props, Terminated}
+import akka.io.Tcp.{Connected, Received}
 import akka.io.{IO, Tcp}
-import akka.util.ByteString
-import org.postgresql.core.{ConnectionFactory, QueryExecutor}
-import org.postgresql.core.v3.ConnectionFactoryImpl
-import org.postgresql.util.HostSpec
+import akka.util.{ByteString, CompactByteString}
+import quickstart.akka.MessageUtils.Utils
 
 import java.net.InetSocketAddress
-import java.sql.{DriverManager, PreparedStatement}
 
-object Client {
-  def props(remote: InetSocketAddress, replies: ActorRef) =
-    Props(classOf[Client], remote, replies)
+object ClientIO {
+  def props(remote: InetSocketAddress, userName: String) =
+    Props(classOf[ClientIO], remote, userName)
 }
-class Client(remote: InetSocketAddress, listener: ActorRef) extends Actor {
+
+class ClientIO(remote: InetSocketAddress, val userName: String) extends Actor {
 
   import akka.io.Tcp._
   import context.system
+  import MessageUtils._
 
-  IO(Tcp) ! Connect(remote)
+  def connectToServer() = {
+    IO(Tcp) ! Connect(remote)
+  }
+
+  val stdin = context.actorOf(StdIn.props, name = "stdinRef")
+  val listener = context.actorOf(Listener.props, name = "listenerRef")
+  val user = User(userName)
+
+  connectToServer()
 
   def receive = {
     case CommandFailed(_: Connect) =>
       listener ! "connect failed"
       context.stop(self)
 
-    case c@Connected(remote, local) =>
+    case c @ Connected(remote, local) =>
       listener ! c
       val connection = sender()
       connection ! Register(self)
+      connection ! RegisterUser(user).writeByteString
+
       context.become {
-        case data: ByteString =>
-          connection ! Write(data)
+//        case data: ByteString =>
+//          connection ! Write(data)
         case CommandFailed(w: Write) =>
           // O/S buffer was full
           listener ! "write failed"
         case Received(data) =>
+          // this is a message from the server
           listener ! data
         case "close" =>
+          connection ! UserGoingOffline(user, Seq.empty[User]).writeByteString
           connection ! Close
+        case s: String =>
+          // this is a message from the listener
+          connection ! TextMessage(user, User("sd"), s).writeByteString
+          listener ! s
+
         case _: ConnectionClosed =>
           listener ! "connection closed"
+          context.stop(listener)
+          context.stop(stdin)
           context.stop(self)
       }
   }
 }
 
-
-/**
- * the client actor can receive a message from :
- *    - stdin
- *    - the socket connection
- *    - main function
- * */
-//object Client {
-//
-//  import akka.io.Tcp._
-//
-//
-//  def apply(remote: InetSocketAddress): Behavior[_] = {
-//
-//    import context.system
-//
-//    IO(Tcp) ! Connect(remote)
-//
-//    Behaviors.setup{ context: ActorContext[_] =>
-//      Behaviors.receiveMessage {
-//        case _ => println("received")
-//      }
-//    }
-//  }
-//
-//  def receive = {
-//    case CommandFailed(_: Connect) =>
-//      listener ! "connect failed"
-//      context.stop(self)
-//
-//    case c@Connected(remote, local) =>
-//      listener ! c
-//      val connection = sender()
-//      connection ! Register(self)
-//      context.become {
-//        case data: ByteString =>
-//          connection ! Write(data)
-//        case CommandFailed(w: Write) =>
-//          // O/S buffer was full
-//          listener ! "write failed"
-//        case Received(data) =>
-//          listener ! data
-//        case "close" =>
-//          connection ! Close
-//        case _: ConnectionClosed =>
-//          listener ! "connection closed"
-//          context.stop(self)
-//      }
-//  }
-//}
-
 class Listener extends Actor {
   override def receive: Receive = {
-    case data => println(data.toString)
+    case Connected(remote, local) =>
+      println(s"Successfully connected to $remote from $local")
+    case data: ByteString => println(s"ByteString: ${data.utf8String}")
+    case s: String => println(s"String: $s")
   }
 }
 
@@ -111,19 +83,23 @@ object Listener {
     Props(classOf[Listener])
 }
 
-class StdIn(listener: ActorRef) extends Actor {
+class StdIn extends Actor {
+  val listener = context.parent
   while (true) {
     val stdin = scala.io.StdIn.readLine()
     listener ! stdin
   }
 
   override def receive: Receive = {
-    case _ => println("....")
+    case _ => {
+      println("....")
+    }
   }
 }
 
+
 object StdIn {
-  def props(listener: ActorRef) = Props(classOf[StdIn], listener)
+  def props = Props(classOf[StdIn])
 }
 
 object ClientApp {
@@ -131,35 +107,37 @@ object ClientApp {
   def main(args: Array[String]): Unit = {
     val system = ActorSystem("Client")
     val port = 5000
-    val swap = system.actorOf(
-      Client.props(
+    val clientIO = system.actorOf(
+      ClientIO.props(
         new InetSocketAddress("localhost", port),
-        system.actorOf(Listener.props)
+        "user1",
       ),
-      name = "ClientMain"
+      name = "ClientMainRef"
     )
-    system.actorOf(StdIn.props(swap), name = "stdin")
+//    val stdin = system.actorOf(StdIn.props(clientIO), name = "stdinRef")
+
   }
 
-//  def apply(host: String, port: Int) = {
-//      Behaviors.setup { context: ActorContext[_] =>
-//        val listenerRef = context.spawn(Listener(), "listener")
-//        val clientRef = context.spawn(Client(new InetSocketAddress("localhost", 5000), listenerRef), "client")
-//        val stdinRef = context.spawn(StdIn(clientRef), "stdin")
-//
-//        context.watch(stdinRef)
-//        context.watch(listenerRef)
-//        context.watch(clientRef)
-//
-//        system.actorOf(StdIn.props(swap), name = "stdin")
-//
-//        chatRoom ! ChatRoom.GetSession("ol’ Gabbler", gabblerRef)
-//
-//        Behaviors.receiveSignal {
-//          case (_, Terminated(_)) =>
-//            Behaviors.stopped
-//        }
-//      }
-//  }
+  //  def apply(host: String, port: Int) = {
+  //      Behaviors.setup { context: ActorContext[_] =>
+  //        val listenerRef = context.spawn(Listener(), "listener")
+  //        val clientRef = context.spawn(Client(new InetSocketAddress("localhost", 5000), listenerRef), "client")
+  //        val stdinRef = context.spawn(StdIn(clientRef), "stdin")
+  //
+  //        context.watch(stdinRef)
+  //        context.watch(listenerRef)
+  //        context.watch(clientRef)
+  //
+  //        system.actorOf(StdIn.props(swap), name = "stdin")
+  //
+  //        chatRoom ! ChatRoom.GetSession("ol’ Gabbler", gabblerRef)
+  //
+  //        Behaviors.receiveSignal {
+  //          case (_, Terminated(_)) =>
+  //            Behaviors.stopped
+  //        }
+  //      }
+  //  }
 
 }
+

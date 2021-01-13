@@ -1,5 +1,8 @@
 package quickstart.messages
 
+import org.apache.commons.lang3.SerializationUtils
+
+import java.io.{ByteArrayInputStream, ByteArrayOutputStream, ObjectInputStream, ObjectOutputStream}
 import java.text.SimpleDateFormat
 
 sealed case class User(name: String)
@@ -7,10 +10,13 @@ sealed case class User(name: String)
 sealed trait Message extends Serializable {
   val user: User
   val timestamp = new java.sql.Timestamp(System.currentTimeMillis())
+
   def dateTimeFormat =
     if (System.currentTimeMillis() - timestamp.getTime <= 86400L * 1000L) "h:mm aa"
     else "dd/MM/yyyy HH:mm"
+
   def ts: String = new SimpleDateFormat(dateTimeFormat).format(timestamp)
+
 }
 
 sealed case class RegisterUser(user: User) extends Message
@@ -28,6 +34,12 @@ sealed case class UserIsOffline(user: User) extends Message {
 sealed case class UserHasGoneOffline(user: User) extends Message {
   override def toString: String = s"(${ts}) ${user.name} has gone offline."
 }
+
+sealed trait SessionCommand
+case object Close extends SessionCommand
+case class ConnectFailed(message: String) extends SessionCommand
+
+
 
 //sealed abstract class HeartBeat(user: User) extends Message
 //sealed case class HeartBeatCall(user: User) extends HeartBeat(user)
