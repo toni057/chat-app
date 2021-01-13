@@ -1,29 +1,48 @@
 package quickstart.sockets
 
+import grizzled.slf4j.Logging
+import quickstart.messages._
+
 import java.io._
 import java.net.{ServerSocket, Socket}
+import java.security.KeyStore
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.concurrent.{ExecutorService, Executors}
-
+import javax.net.SocketFactory
+import javax.net.ssl.{KeyManagerFactory, SSLServerSocket, SSLServerSocketFactory, SSLSocket, SSLSocketFactory}
 import scala.jdk.CollectionConverters._
 import scala.util.Try
 
-class Server(host: String, port: Int) {
+class Server(host: String, port: Int) extends Logging{
   require(port >= 0 && port <= 65535, "Port must be in the range 0-65535, inclusive")
 
-  val pool: ExecutorService = Executors.newFixedThreadPool(10)
-
-  val MAX_SIZE = 1000
   val serverSocket = new ServerSocket(port)
+
+//  val ks = KeyStore.getInstance("JKS");
+//  val ksIs = new FileInputStream("...");
+//  try {
+//    ks.load(ksIs, "password".toCharArray());
+//  } finally {
+//    if (ksIs != null) {
+//      ksIs.close()
+//    }
+//  }
+//  val kmf = KeyManagerFactory.getInstance(KeyManagerFactory
+//    .getDefaultAlgorithm());
+//  kmf.init(ks, "keypassword".toCharArray());
+//  val serverSocket = SSLServerSocketFactory.getDefault().createServerSocket(port).asInstanceOf[SSLServerSocket]//.createServerSocket(host, port)
+//  serverSocket.setEnabledProtocols(Array("TLSv1", "TLSv1.1", "TLSv1.2", "SSLv3"))
+
+  val pool: ExecutorService = Executors.newFixedThreadPool(10)
+  val MAX_SIZE = 1000
 
   def newInputStream(socket: Socket) = new ObjectInputStream(socket.getInputStream)
 
   def newOutputStream(socket: Socket) = new ObjectOutputStream(socket.getOutputStream)
 
-  //  var registeredUsers = Set.empty[User]
   var connections =
-    new java.util.concurrent.ConcurrentHashMap[User, (Socket, ObjectInputStream, ObjectOutputStream)]().asScala
+    new java.util.concurrent.ConcurrentHashMap[User, ClientConnection]().asScala
 
   def start() = {
     try {
@@ -37,44 +56,27 @@ class Server(host: String, port: Int) {
 
   def register(user: User, socket: Socket, in: ObjectInputStream, out: ObjectOutputStream): Unit = {
     println(s"Registering ${user.name}")
-    //    registeredUsers = registeredUsers + user
-    connections.addOne(user, (socket, in, out))
+    connections.addOne(user, ClientConnection(socket, in, out))
   }
 
   def exit(user: User) = {
-    /** todo * */
-    // remove from registered users
-    // notify online friends that the user is now offline
-
-    //    registeredUsers = registeredUsers - user
     connections = connections.subtractOne(user)
   }
 
   def text(from: User, to: User, message: String) = {
-    // verify to exists
-    // if exists send message
-    //    connections
-    //      .get(to)
-    //      .map { case (_, _, out) => (out, TextMessage(from, to, message)) }
-    //      .orElse{
-    //        connections
-    //          .get(from)
-    //          .map { case(_, _, out) => (out, UserIsOffline(to)) }
-    //      }
-    //      .foreach{ case(conn, message) => sendMessage(conn, message) }
     sendMessage(to, TextMessage(from, to, message))
       .orElse(sendMessage(from, UserIsOffline(to)))
   }
 
   def sendMessage(to: User, message: Message) = {
     for {
-      (_, _, out) <- connections.get(to)
+      ClientConnection(_, _, out) <- connections.get(to)
       success <- Try(out.writeObject(message)).toOption
     } yield success
   }
 
   def stop(): Unit = {
-    connections.view.mapValues(_._1.close())
+    connections.view.mapValues(_.socket.close())
     serverSocket.close()
   }
 
@@ -99,18 +101,21 @@ class Server(host: String, port: Int) {
           }
           Thread.sleep(100)
         } catch {
-          case _: Throwable => {}
+          case e: Throwable => {
+            logger.info(e.getMessage)
+          }
         }
       }
     }
   }
+
+  protected case class ClientConnection(socket: Socket, in: ObjectInputStream, out: ObjectOutputStream)
 
   //  class HeartBeat extends Runnable {
   //    override def run(): Unit = {
   //      connections =
   //    }
   //  }
-
 }
 
 object Server {

@@ -1,8 +1,11 @@
 package quickstart.sockets
 
+import grizzled.slf4j.Logging
+import quickstart.messages._
+
 import java.io.{ObjectInputStream, ObjectOutputStream}
 import java.net.Socket
-
+import javax.net.ssl.{SSLSocket, SSLSocketFactory}
 import sun.misc.Signal
 import sun.misc.SignalHandler
 
@@ -10,9 +13,10 @@ import scala.sys.exit
 import scala.util.Try
 
 
-class Client(name: String, friendName: String, ip: String, port: Int) {
+class Client(name: String, friendName: String, host: String, port: Int) {
 
-  private var socket = new Socket(ip, port)
+  private var socket = new Socket(host, port)
+//  private var socket = SSLSocketFactory.getDefault().createSocket(host, port)
   private var out: ObjectOutputStream = new ObjectOutputStream(socket.getOutputStream)
   private var in: ObjectInputStream = new ObjectInputStream(socket.getInputStream)
 
@@ -24,27 +28,26 @@ class Client(name: String, friendName: String, ip: String, port: Int) {
   val clientHandlerInput = new ClientHandlerInput(socket)
   val clientHandlerOutput = new ClientHandlerOutput(socket)
 
+  val messageHistory = scala.collection.mutable.ArrayBuffer
+
   clientHandlerInput.start()
   clientHandlerOutput.start()
 
-  class ClientHandlerInput(socket: Socket) extends Thread {
+  class ClientHandlerInput(socket: Socket) extends Thread with Logging {
     override def run(): Unit = {
       while (!socket.isClosed) {
         try {
           println(in.readObject().asInstanceOf[Message])
-          //        in.readObject().asInstanceOf[Message] match {
-          //          case t @ TextMessage(sender, _, contents) => println(t.toString)
-          //          case m @ UserHasGoneOffline(friend: User) => println(m.toString)
-          //          case m @ UserIsOffline(User(toni))
-          //        }
           Thread.sleep(100)
         } catch {
-          case _ : Throwable => {}
+          case e : Throwable => {
+            logger.info(e.getMessage)
+          }
         }
       }
     }
   }
-  class ClientHandlerOutput(socket: Socket) extends Thread {
+  class ClientHandlerOutput(socket: Socket) extends Thread with Logging {
     override def run(): Unit = {
       while (!socket.isClosed) {
         try {
@@ -54,7 +57,9 @@ class Client(name: String, friendName: String, ip: String, port: Int) {
           }
           Thread.sleep(100)
         } catch {
-          case _ : Throwable => {}
+          case e : Throwable => {
+            logger.info(e.getMessage)
+          }
         }
       }
     }

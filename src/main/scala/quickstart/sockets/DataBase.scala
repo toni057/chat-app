@@ -1,5 +1,7 @@
 package quickstart.sockets
 
+import quickstart.messages._
+
 import scala.util.Try
 
 trait DataBase {
