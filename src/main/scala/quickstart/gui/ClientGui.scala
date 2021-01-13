@@ -1,4 +1,4 @@
-package quickstart.gui
+/*package quickstart.gui
 
 import scalafx.geometry.{Insets, Pos}
 import scalafx.scene.control.{Button, CheckBox, ChoiceBox, Label, PasswordField, RadioButton, ScrollPane, TextField, ToggleGroup, Tooltip}
@@ -57,3 +57,4 @@ object ClientGui extends JFXApp {
   }
 }
 
+ */
